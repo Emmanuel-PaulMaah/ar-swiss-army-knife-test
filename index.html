@@ -2,138 +2,144 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Combined AR + Diagnostic Test</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AR Swiss Army Knife Test</title>
   <style>
     body { font-family: sans-serif; padding: 20px; line-height: 1.5; }
     .status { font-weight: bold; }
     .supported { color: green; }
     .unsupported { color: red; }
-    #arCanvas { width: 100%; height: 50vh; background: #000; display: none; }
+    ul { list-style: none; padding: 0; }
+    li { margin-bottom: 0.5em; }
+    button { padding: 0.6em 1.2em; margin-top: 1em; font-size: 1em; }
     #errorMsg { color: red; margin-top: 1em; }
-    button { padding: 0.5em 1em; margin-top: 1em; }
+    canvas.xr-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
   </style>
 </head>
 <body>
-  <h1>AR + Diagnostics Test</h1>
-  <ul id="diagResults"></ul>
+  <h1>AR Swiss Army Knife Test</h1>
+  <ul id="results"></ul>
 
   <button id="startARBtn" disabled>Start AR</button>
-
-  <div id="arCanvas"></div>
   <div id="errorMsg"></div>
 
   <script>
-    const diagResults = document.getElementById('diagResults');
+    const results = document.getElementById('results');
     const startBtn = document.getElementById('startARBtn');
-    const arCanvasDiv = document.getElementById('arCanvas');
     const errorMsg = document.getElementById('errorMsg');
+
+    let arSupported = false;
+    let supportedFeatures = [];
 
     function addResult(label, supported, info = '') {
       const li = document.createElement('li');
-      li.innerHTML = `${label}: <span class="status ${supported ? 'supported' : 'unsupported'}">${supported ? '✅ Supported' : '❌ Not Supported'}</span> ${info}`;
-      diagResults.appendChild(li);
+      li.innerHTML = `${label}: <span class="status ${supported ? 'supported' : 'unsupported'}">${supported ? '✅' : '❌'}</span> ${info}`;
+      results.appendChild(li);
     }
 
-    async function runDiagnostics() {
-      // 1. Secure context
-      addResult('Secure context (HTTPS)', window.isSecureContext);
+    async function runTests() {
+      // 1. Secure Context
+      addResult("Secure Context (HTTPS)", window.isSecureContext);
 
       // 2. WebXR API
       const xrAvailable = !!navigator.xr;
-      addResult('navigator.xr available', xrAvailable);
+      addResult("navigator.xr available", xrAvailable);
 
-      // 3. Device type
-      const ua = navigator.userAgent;
-      const isAndroid = /Android/i.test(ua);
-      const isIOS = /iPhone|iPad|iPod/i.test(ua);
-      addResult('Device type', true, isAndroid ? 'Android' : isIOS ? 'iOS' : 'Other');
-
-      // 4. immersive-ar support
-      let arSupport = false;
+      // 3. Immersive-AR Session Support
       if (xrAvailable) {
         try {
-          arSupport = await navigator.xr.isSessionSupported('immersive-ar');
-          addResult('immersive-ar session supported', arSupport);
+          arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+          addResult("Immersive-AR session support", arSupported, arSupported ? "Device reports AR capability" : "No ARCore/ARKit or unsupported browser");
         } catch (err) {
-          addResult('immersive-ar session supported', false, `Error: ${err.message}`);
+          addResult("Immersive-AR session support", false, `Error: ${err.message}`);
+        }
+      }
+
+      // 4. Camera Permission
+      if (navigator.mediaDevices?.getUserMedia) {
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: true });
+          addResult("Camera access", true);
+        } catch (err) {
+          addResult("Camera access", false, `Denied or unavailable: ${err.message}`);
         }
       } else {
-        addResult('immersive-ar session supported', false, 'navigator.xr missing');
+        addResult("Camera access", false, "getUserMedia not available");
       }
 
-      // 5. Camera permission / getUserMedia
-      try {
-        await navigator.mediaDevices.getUserMedia({ video: true });
-        addResult('Camera permission / access', true);
-      } catch (err) {
-        addResult('Camera permission / access', false, `Error: ${err.message}`);
-      }
-
-      // 6. Motion / orientation sensors (devicemotion)
+      // 5. Motion/Orientation Sensors
       let motionSupported = false;
       function motionListener(e) { motionSupported = true; window.removeEventListener('devicemotion', motionListener); }
       window.addEventListener('devicemotion', motionListener);
-      // short delay
-      await new Promise(res => setTimeout(res, 700));
-      addResult('Device motion/orientation sensors', motionSupported);
+      await new Promise(r => setTimeout(r, 800));
+      addResult("Motion/orientation sensors", motionSupported);
 
-      // 7. WebGL support
+      // 6. WebGL
       let webgl = false;
       try {
         const canvas = document.createElement('canvas');
-        webgl = !!(window.WebGLRenderingContext && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
-        addResult('WebGL support', webgl);
-      } catch(e) {
-        addResult('WebGL support', false);
+        webgl = !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+      } catch(e) {}
+      addResult("WebGL support", webgl);
+
+      // 7. Session Features Test
+      if (xrAvailable && arSupported) {
+        const features = ['local-floor', 'bounded-floor', 'unbounded', 'hit-test', 'dom-overlay'];
+        for (const feat of features) {
+          try {
+            await navigator.xr.requestSession('immersive-ar', { requiredFeatures: [feat] });
+            addResult(`Feature "${feat}"`, true);
+            supportedFeatures.push(feat);
+          } catch (err) {
+            addResult(`Feature "${feat}"`, false, `Not supported: ${err.message}`);
+          }
+        }
       }
 
-      // Enable Start AR button only if immersive-ar is supported
-      if (arSupport) {
+      // 8. CORS Test
+      try {
+        const resp = await fetch('https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore', { method: 'HEAD', mode: 'cors' });
+        addResult("CORS asset fetch", resp.ok);
+      } catch (err) {
+        addResult("CORS asset fetch", false, `Error: ${err.message}`);
+      }
+
+      // Enable AR button if immersive-ar is supported
+      if (arSupported) {
         startBtn.disabled = false;
       } else {
-        errorMsg.innerText = 'AR not fully supported on this device. Start AR is disabled.';
+        errorMsg.innerText = "AR not supported on this device.";
       }
     }
 
     async function startAR() {
       errorMsg.innerText = '';
-      // Create minimal AR scene
       try {
-        const session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
-        // create canvas and WebGL layer
+        const session = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: supportedFeatures });
         const canvas = document.createElement('canvas');
-        const gl = canvas.getContext('webgl', { xrCompatible: true });
+        canvas.className = "xr-canvas";
         document.body.appendChild(canvas);
-        canvas.style.position = 'absolute';
-        canvas.style.top = '0';
-        canvas.style.left = '0';
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
+        const gl = canvas.getContext('webgl', { xrCompatible: true });
 
         session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-        const referenceSpace = await session.requestReferenceSpace('local-floor');
+        const refSpace = await session.requestReferenceSpace('local-floor');
 
         const onXRFrame = (time, frame) => {
           session.requestAnimationFrame(onXRFrame);
-          const pose = frame.getViewerPose(referenceSpace);
+          const pose = frame.getViewerPose(refSpace);
           if (pose) {
-            // clear and render something simple
             gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
-            gl.clearColor(0.3, 0.7, 0.3, 0.5);
+            gl.clearColor(0.1, 0.6, 0.9, 0.4);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
           }
         };
         session.requestAnimationFrame(onXRFrame);
-
       } catch (err) {
-        console.error('Failed to start AR:', err);
-        errorMsg.innerText = 'Failed to start AR session: ' + err.message;
+        errorMsg.innerText = "Failed to start AR: " + err.message;
       }
     }
 
     startBtn.addEventListener('click', startAR);
-    runDiagnostics();
+    runTests();
   </script>
 </body>
 </html>
